@@ -1,149 +1,189 @@
-
 import streamlit as st
 import pandas as pd
+import sqlite3
+from datetime import date
 
-st.set_page_config(
-    page_title="Employee Performance Analysis",
-    page_icon="📊",
-    layout="wide"
-)
+st.set_page_config(page_title="Employee Performance Management System", page_icon="📊", layout="wide")
+DB = "employee_performance.db"
+DEMO_USER, DEMO_PASS = "admin", "admin123"  # Demo only; not production security.
 
-st.title("📊 Employee Performance Analysis System")
-st.write(
-    "Analyse employee attendance, productivity, "
-    "and overall performance."
-)
+def connect():
+    return sqlite3.connect(DB, check_same_thread=False)
 
-# Sample employee dataset
-data = {
-    "Employee": [
-        "Arun", "Priya", "Rahul", "Divya",
-        "Kumar", "Meena", "Ravi", "Sneha"
-    ],
-    "Department": [
-        "IT", "HR", "Sales", "IT",
-        "Finance", "HR", "Sales", "Finance"
-    ],
-    "Attendance": [95, 98, 80, 92, 88, 94, 85, 97],
-    "Productivity": [90, 85, 75, 96, 82, 91, 79, 93],
-    "Performance": [92, 89, 77, 94, 84, 90, 80, 95]
-}
+def setup_db():
+    with connect() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS employees(
+            employee_id TEXT PRIMARY KEY, employee_name TEXT NOT NULL,
+            department TEXT NOT NULL, designation TEXT NOT NULL,
+            attendance REAL NOT NULL, productivity REAL NOT NULL,
+            performance REAL NOT NULL, review_date TEXT NOT NULL)""")
+        if con.execute("SELECT COUNT(*) FROM employees").fetchone()[0] == 0:
+            sample = [
+                ("EMP001","Arun","IT","Developer",95,90,92,"2026-10-01"),
+                ("EMP002","Priya","HR","HR Associate",98,85,89,"2026-10-01"),
+                ("EMP003","Rahul","Sales","Sales Executive",80,75,77,"2026-10-01"),
+                ("EMP004","Divya","IT","Tester",92,96,94,"2026-10-01"),
+                ("EMP005","Kumar","Finance","Accountant",88,82,84,"2026-10-01"),
+                ("EMP006","Meena","HR","Recruiter",94,91,90,"2026-10-01"),
+                ("EMP007","Ravi","Sales","Sales Associate",85,79,80,"2026-10-01"),
+                ("EMP008","Sneha","Finance","Analyst",97,93,95,"2026-10-01")]
+            con.executemany("INSERT INTO employees VALUES(?,?,?,?,?,?,?,?)", sample)
 
-df = pd.DataFrame(data)
+def read_data():
+    with connect() as con:
+        return pd.read_sql_query("SELECT * FROM employees ORDER BY employee_id", con)
 
-# Dashboard summary
-st.header("Employee Dashboard")
+def level(score):
+    return "High" if score >= 90 else "Average" if score >= 75 else "Needs Improvement"
 
-col1, col2, col3, col4 = st.columns(4)
+setup_db()
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
-col1.metric("Total Employees", len(df))
-col2.metric(
-    "Average Performance",
-    f"{df['Performance'].mean():.1f}%"
-)
-col3.metric(
-    "Average Attendance",
-    f"{df['Attendance'].mean():.1f}%"
-)
-col4.metric(
-    "Average Productivity",
-    f"{df['Productivity'].mean():.1f}%"
-)
+if not st.session_state.logged_in:
+    st.title("🔐 Employee Performance Management System")
+    st.write("Sign in to access the MCA mini-project application.")
+    with st.form("login"):
+        user = st.text_input("Username")
+        pwd = st.text_input("Password", type="password")
+        go = st.form_submit_button("Login")
+    if go:
+        if user == DEMO_USER and pwd == DEMO_PASS:
+            st.session_state.logged_in = True
+            st.rerun()
+        else:
+            st.error("Incorrect username or password.")
+    st.info("Demo login — Username: admin | Password: admin123")
+    st.warning("Demo credentials only. This is not production-grade authentication.")
+    st.stop()
 
-# Employee details
-st.header("Employee Details")
-st.dataframe(df, use_container_width=True)
+st.sidebar.title("Project Navigation")
+page = st.sidebar.radio("Open module", [
+    "Dashboard", "Add Employee", "Manage Employees",
+    "Performance Evaluation", "Analytics & Reports"])
+if st.sidebar.button("Logout"):
+    st.session_state.logged_in = False
+    st.rerun()
 
-# Department filter
-st.header("Filter Employees")
+st.title("Employee Performance Management and Analytics System")
+st.caption("MCA Mini Project | Python • Streamlit • SQLite")
+df = read_data()
 
-departments = ["All"] + sorted(df["Department"].unique().tolist())
+if page == "Dashboard":
+    st.header("Dashboard")
+    a,b,c,d = st.columns(4)
+    a.metric("Total Employees", len(df))
+    b.metric("Average Performance", f"{df.performance.mean():.1f}%" if len(df) else "0%")
+    c.metric("Average Attendance", f"{df.attendance.mean():.1f}%" if len(df) else "0%")
+    d.metric("Average Productivity", f"{df.productivity.mean():.1f}%" if len(df) else "0%")
+    st.subheader("Employee Records")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    if len(df):
+        best = df.loc[df.performance.idxmax()]
+        st.success(f"Highest score: {best.employee_name} — {best.performance:.0f}%")
+    st.info("Initial records are sample data for academic demonstration.")
 
-selected_department = st.selectbox(
-    "Select Department",
-    departments
-)
+elif page == "Add Employee":
+    st.header("Add New Employee")
+    with st.form("add"):
+        x,y = st.columns(2)
+        empid = x.text_input("Employee ID", placeholder="EMP009").strip().upper()
+        name = y.text_input("Employee Name").strip()
+        dept = x.selectbox("Department", ["IT","HR","Sales","Finance","Operations","Other"])
+        role = y.text_input("Designation").strip()
+        att = x.number_input("Attendance (%)", 0.0, 100.0, 90.0)
+        prod = y.number_input("Productivity (%)", 0.0, 100.0, 85.0)
+        perf = x.number_input("Performance (%)", 0.0, 100.0, 85.0)
+        review = y.date_input("Review Date", date.today())
+        save = st.form_submit_button("Save Employee")
+    if save:
+        if not empid or not name or not role:
+            st.error("Employee ID, name and designation are required.")
+        else:
+            try:
+                with connect() as con:
+                    con.execute("INSERT INTO employees VALUES(?,?,?,?,?,?,?,?)",
+                        (empid,name,dept,role,att,prod,perf,review.isoformat()))
+                st.success("Employee added successfully.")
+                st.rerun()
+            except sqlite3.IntegrityError:
+                st.error("Employee ID already exists. Enter a unique ID.")
 
-if selected_department == "All":
-    filtered_df = df.copy()
-else:
-    filtered_df = df[
-        df["Department"] == selected_department
-    ].copy()
+elif page == "Manage Employees":
+    st.header("View, Update and Delete Employees")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    if len(df):
+        empid = st.selectbox("Choose Employee ID", df.employee_id.tolist())
+        row = df[df.employee_id == empid].iloc[0]
+        with st.form("update"):
+            name = st.text_input("Employee Name", str(row.employee_name))
+            deptlist = ["IT","HR","Sales","Finance","Operations","Other"]
+            olddept = str(row.department)
+            dept = st.selectbox("Department", deptlist, index=deptlist.index(olddept) if olddept in deptlist else 5)
+            role = st.text_input("Designation", str(row.designation))
+            att = st.number_input("Attendance (%)", 0.0, 100.0, float(row.attendance))
+            prod = st.number_input("Productivity (%)", 0.0, 100.0, float(row.productivity))
+            perf = st.number_input("Performance (%)", 0.0, 100.0, float(row.performance))
+            review = st.date_input("Review Date", date.fromisoformat(str(row.review_date)))
+            update = st.form_submit_button("Update Record")
+        if update:
+            if not name.strip() or not role.strip():
+                st.error("Name and designation cannot be empty.")
+            else:
+                with connect() as con:
+                    con.execute("""UPDATE employees SET employee_name=?,department=?,designation=?,
+                    attendance=?,productivity=?,performance=?,review_date=? WHERE employee_id=?""",
+                    (name.strip(),dept,role.strip(),att,prod,perf,review.isoformat(),empid))
+                st.success("Record updated.")
+                st.rerun()
+        confirm = st.checkbox(f"Confirm deletion of {empid}")
+        if st.button("Delete Selected Employee", disabled=not confirm):
+            with connect() as con:
+                con.execute("DELETE FROM employees WHERE employee_id=?", (empid,))
+            st.success("Employee deleted.")
+            st.rerun()
 
-# Performance chart
-st.header("1. Employee Performance Chart")
-
-performance_chart = filtered_df.set_index("Employee")[
-    "Performance"
-]
-st.bar_chart(performance_chart)
-
-# Attendance chart
-st.header("2. Employee Attendance Chart")
-
-attendance_chart = filtered_df.set_index("Employee")[
-    "Attendance"
-]
-st.bar_chart(attendance_chart)
-
-# Productivity chart
-st.header("3. Employee Productivity Chart")
-
-productivity_chart = filtered_df.set_index("Employee")[
-    "Productivity"
-]
-st.bar_chart(productivity_chart)
-
-# Department comparison
-st.header("4. Department-wise Performance")
-
-department_scores = df.groupby("Department")[
-    "Performance"
-].mean()
-
-st.bar_chart(department_scores)
-
-# Performance classification
-st.header("5. Performance Classification")
-
-def classify_performance(score):
-    if score >= 90:
-        return "High"
-    elif score >= 75:
-        return "Average"
+elif page == "Performance Evaluation":
+    st.header("Performance Evaluation")
+    if len(df):
+        empid = st.selectbox("Select Employee", df.employee_id.tolist())
+        row = df[df.employee_id == empid].iloc[0]
+        st.write(f"Employee: **{row.employee_name}** | Department: **{row.department}**")
+        with st.form("evaluation"):
+            att = st.slider("Attendance (%)", 0, 100, int(row.attendance))
+            prod = st.slider("Productivity (%)", 0, 100, int(row.productivity))
+            perf = st.slider("Performance Score (%)", 0, 100, int(row.performance))
+            review = st.date_input("Evaluation Date", date.today())
+            save = st.form_submit_button("Save Evaluation")
+        if save:
+            with connect() as con:
+                con.execute("""UPDATE employees SET attendance=?,productivity=?,performance=?,review_date=?
+                WHERE employee_id=?""", (att,prod,perf,review.isoformat(),empid))
+            st.success("Evaluation saved.")
+            st.rerun()
     else:
-        return "Needs Improvement"
+        st.info("Add an employee first.")
 
-report_df = df.copy()
-
-report_df["Performance Level"] = report_df[
-    "Performance"
-].apply(classify_performance)
-
-st.dataframe(report_df, use_container_width=True)
-
-# Top performer
-top_employee = df.loc[df["Performance"].idxmax()]
-
-st.success(
-    f"Top Performer: {top_employee['Employee']} "
-    f"({top_employee['Performance']}%)"
-)
-
-# Download report
-st.header("6. Download Performance Report")
-
-csv_data = report_df.to_csv(index=False).encode("utf-8")
-
-st.download_button(
-    label="📥 Download Full Employee Report (CSV)",
-    data=csv_data,
-    file_name="employee_performance_report.csv",
-    mime="text/csv"
-)
-
-st.info(
-    "Note: This project uses sample employee data "
-    "for academic demonstration."
-)
+elif page == "Analytics & Reports":
+    st.header("Analytics and Reports")
+    if len(df):
+        df["performance_level"] = df.performance.apply(level)
+        departments = ["All"] + sorted(df.department.unique().tolist())
+        chosen = st.selectbox("Filter department", departments)
+        view = df if chosen == "All" else df[df.department == chosen]
+        st.subheader("Performance by Employee")
+        st.bar_chart(view.set_index("employee_name")["performance"])
+        st.subheader("Attendance")
+        st.bar_chart(view.set_index("employee_name")["attendance"])
+        st.subheader("Productivity")
+        st.bar_chart(view.set_index("employee_name")["productivity"])
+        st.subheader("Department Average Performance")
+        st.bar_chart(df.groupby("department")["performance"].mean())
+        st.subheader("Performance Classification")
+        st.dataframe(view[["employee_id","employee_name","department","performance","performance_level"]],
+                     use_container_width=True, hide_index=True)
+        st.download_button("Download Employee Report (CSV)",
+            df.to_csv(index=False).encode("utf-8"),
+            "employee_performance_report.csv","text/csv")
+    else:
+        st.info("No employee records available.")
